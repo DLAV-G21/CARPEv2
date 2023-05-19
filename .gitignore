@@ -2,7 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
+val2017/*
 # C extensions
 *.so
 
