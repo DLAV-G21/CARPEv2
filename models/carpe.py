@@ -108,7 +108,7 @@ class SetCriterion(nn.Module):
         idx = self._get_src_permutation_idx(indices)
 
         # Concatenate the classes of all keypoints / images
-        target_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices)])
+        target_classes_o = torch.cat([t["labels_keypoints"][J] for t, (_, J) in zip(targets, indices)]).long()
         # Create a tensor with the "non-object class"
         target_classes = torch.full(src_logits.shape[:2], self.num_classes_keypoints,
                                     dtype=torch.int64, device=src_logits.device)
@@ -170,7 +170,7 @@ class SetCriterion(nn.Module):
         indices = self.matcher(outputs, targets)
 
         # Compute the average number of target boxes accross all nodes, for normalization purposes
-        num_boxes = sum(len(t["labels"]) for t in targets)
+        num_boxes = sum(len(t["labels_keypoints"]) for t in targets)
         num_boxes = torch.as_tensor([num_boxes], dtype=torch.float, device=next(iter(outputs.values())).device)
         num_boxes = torch.clamp(num_boxes, min=1).item()
 
@@ -185,7 +185,7 @@ class SetCriterion(nn.Module):
 class PostProcess(nn.Module):
     """ This module converts the model's output into the format expected by the coco api"""
     @torch.no_grad()
-    def forward(self, outputs, target_sizes):
+    def forward(self, outputs, targets):
         """ Perform the computation
         Parameters:
             outputs: raw outputs of the model
@@ -193,13 +193,16 @@ class PostProcess(nn.Module):
                           For evaluation, this must be the original image size (before any data augmentation)
                           For visualization, this should be the image size after data augment, but before padding
         """
-        out_logits, out_bbox = outputs['pred_logits'], outputs['pred_boxes']
+        out_logits, out_bbox = outputs['pred_logits'], outputs['pred_keypoints']
 
         assert len(out_logits) == len(target_sizes)
         assert target_sizes.shape[1] == 2
 
         prob = F.softmax(out_logits, -1)
         scores, labels = prob[..., :-1].max(-1)
+
+        target_sizes = torch.stack([t["size"] for t in targets])
+
 
         # convert to [x0, y0, x1, y1] format
         boxes = box_ops.box_cxcywh_to_xyxy(out_bbox)

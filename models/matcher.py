@@ -17,7 +17,7 @@ class HungarianMatcher(nn.Module):
     while the others are un-matched (and thus treated as non-objects).
     """
 
-    def __init__(self, cost_class: float = 1, cost_bbox: float = 1,mode="boxes"):
+    def __init__(self, cost_class: float = 1, cost_bbox: float = 1,cost_giou:float = 1,mode="boxes"):
         """Creates the matcher
 
         Params:
@@ -29,7 +29,8 @@ class HungarianMatcher(nn.Module):
         self.cost_class = cost_class
         self.cost_bbox = cost_bbox
         self.mode = mode
-        assert cost_class != 0 or cost_bbox != 0, "all costs cant be 0"
+        self.cost_giou = cost_giou
+        assert cost_class != 0 or cost_bbox != 0 or cost_giou != 0, "all costs cant be 0"
 
     def forward(self, outputs, targets):
         all_indices = []
@@ -63,22 +64,14 @@ class HungarianMatcher(nn.Module):
             For each batch element, it holds:
                 len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
         """
-        print("PD")
-        print(outputs["pred_"+self.mode].shape)
-        print(targets[0][self.mode].shape)
-        print("NNNNNNNAAAAAAN")
         bs, num_queries = outputs["pred_logits"].shape[:2]
 
         # We flatten to compute the cost matrices in a batch
         out_prob = outputs["pred_logits"].flatten(0, 1).softmax(-1)  # [batch_size * num_queries, num_classes]
-        out_bbox = outputs["pred_"+self.mode].flatten(0, 1)  # [batch_size * num_queries, 4]
-        print("out_prob",out_prob.shape)
-        print("out_bbox",out_bbox.shape)
+        out_bbox = outputs["pred_"+self.mode].flatten(0, 1)  # [batch_size * num_queries, {2 (keypoints), 4 (links), 4 boxes}]
         # Also concat the target labels and boxes
-        tgt_ids = torch.cat([v["labels"] for v in targets])
+        tgt_ids = torch.cat([v["labels" if self.mode == "boxes" else "labels_"+self.mode] for v in targets]).long()
         tgt_bbox = torch.cat([v[self.mode] for v in targets])
-        print("tgt_ids",tgt_ids.shape)
-        print("tgt_box",tgt_bbox.shape)
 
         # Compute the classification cost. Contrary to the loss, we don't use the NLL,
         # but approximate it in 1 - proba[target class].
@@ -88,8 +81,14 @@ class HungarianMatcher(nn.Module):
         # Compute the L1 cost between boxes
         cost_bbox = torch.cdist(out_bbox, tgt_bbox, p=1)
 
+        # Compute the giou cost betwen boxes
+        if self.mode == "boxes":
+            cost_giou = -generalized_box_iou(box_cxcywh_to_xyxy(out_bbox), box_cxcywh_to_xyxy(tgt_bbox))
+        else:
+            cost_giou = 0.0
+
         # Final cost matrix
-        C = self.cost_bbox * cost_bbox + self.cost_class * cost_class 
+        C = self.cost_bbox * cost_bbox + self.cost_class * cost_class + self.cost_giou * cost_giou
         C = C.view(bs, num_queries, -1).cpu()
 
         sizes = [len(v[self.mode]) for v in targets]
@@ -98,4 +97,4 @@ class HungarianMatcher(nn.Module):
 
 
 def build_matcher(args,mode="boxes"):
-    return HungarianMatcher(cost_class=args.set_cost_class, cost_bbox=args.set_cost_bbox,mode=mode)
+    return HungarianMatcher(cost_class=args.set_cost_class, cost_bbox=args.set_cost_bbox,cost_giou=args.set_cost_giou, mode=mode)

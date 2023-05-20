@@ -144,7 +144,8 @@ class ConvertCocoPolysToMask(object):
         return image, target
 
 
-def make_coco_transforms(image_set,size, apply_augm):
+
+def make_coco_transforms(image_set, size, apply_augm):
 
     normalize = T.Compose([
         T.ToTensor(),
@@ -162,7 +163,7 @@ def make_coco_transforms(image_set,size, apply_augm):
         return T.Compose(lst)       
         
 
-    if image_set == 'val':
+    if image_set == 'val' or image_set =="test":
         return T.Compose([
             T.Resize(size),
             normalize,
@@ -173,17 +174,18 @@ def make_coco_transforms(image_set,size, apply_augm):
 def albumentations_transform(image_set):
     if image_set == "train": 
         return al.Compose([
-        al.HorizontalFlip(p=0.5),
         al.ColorJitter(0.4, 0.4, 0.5, 0.2, p=0.6),
         al.RandomBrightnessContrast(p=0.5),
         al.ToGray(p=0.01),
         al.FancyPCA(p=0.3),
-        al.JpegCompression(50, 80,p=0.1),
+        al.ImageCompression(50, 80,p=0.1),
         al.RandomSunFlare(p=0.05),
         al.Solarize(p=0.05),
         al.GaussNoise(var_limit=(1.0,30.0), p=0.2)
       ])
     elif image_set == "val":
+        return None
+    elif image_set == "test":
         return None
 
 def build(image_set, args):

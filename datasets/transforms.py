@@ -27,12 +27,12 @@ def hflip(image, target):
 
     if "keypoints" in target:
         keypoints = target["keypoints"]
-        keypoints = keypoints[:]*torch.as_tensor([-1,1,1]) + torch.as_tensor([w,0,0])
+        keypoints = keypoints[:]*torch.as_tensor([-1,1]) + torch.as_tensor([w,0])
         target["keypoints"] = keypoints
 
     if "links" in target:
         links = target["links"]
-        links = links[:]*torch.as_tensor([-1,1,-1,1,1]) + torch.as_tensor([w,0,w,0,0])
+        links = links[:]*torch.as_tensor([-1,1,-1,1]) + torch.as_tensor([w,0,w,0])
         target["links"] = links
 
     return flipped_image, target
@@ -61,12 +61,12 @@ def resize(image, target, size):
 
     if "keypoints" in target:
         keypoints = target["keypoints"]
-        scaled_keypoints = keypoints*torch.as_tensor([ratio_width, ratio_height, 1.0])
+        scaled_keypoints = keypoints*torch.as_tensor([ratio_width, ratio_height])
         target["keypoints"] = scaled_keypoints
         
     if "links" in target:
         links = target["links"]
-        scaled_links = links*torch.as_tensor([ratio_width, ratio_height, ratio_width, ratio_height, 1.0])
+        scaled_links = links*torch.as_tensor([ratio_width, ratio_height, ratio_width, ratio_height])
         target["links"] = scaled_links
 
     h, w = size
@@ -118,12 +118,12 @@ class Normalize(object):
 
         if "keypoints" in target:
             keypoints = target["keypoints"]
-            keypoints = keypoints/torch.tensor([w,h,1.0],dtype=torch.float32)
+            keypoints = keypoints/torch.tensor([w,h],dtype=torch.float32)
             target["keypoints"] = keypoints
 
         if "links" in target:
             links = target["links"]
-            links = links/torch.tensor([w,h,w,h,1.0],dtype=torch.float32)
+            links = links/torch.tensor([w,h,w,h],dtype=torch.float32)
             target["links"] = links
             
         return image, target
@@ -136,7 +136,6 @@ class Compose(object):
     def __call__(self, image, target):
         for t in self.transforms:
             image, target = t(image, target)
-        raise ValueError()
         return image, target
 
     def __repr__(self):
