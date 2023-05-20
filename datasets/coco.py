@@ -96,7 +96,7 @@ class ConvertCocoPolysToMask(object):
             if num_links:
                 links = links.view(num_links, -1, 5)
 
-        keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
+        keep = (boxes[:, 3] >= boxes[:, 1]) & (boxes[:, 2] >= boxes[:, 0])
         boxes = boxes[keep]
         classes = classes[keep]
 
@@ -111,10 +111,25 @@ class ConvertCocoPolysToMask(object):
         target["labels"] = classes
 
         target["image_id"] = image_id
+        
         if keypoints is not None:
+            labels_keypoints = torch.as_tensor(range(keypoints.shape[1]), dtype=torch.float32).expand(*keypoints.shape[:2])
+            keep_keypoints =  keypoints[:,:,-1] > 0
+
+            keypoints = keypoints[keep_keypoints][:,:-1]
+            labels_keypoints = labels_keypoints[keep_keypoints]
+
+            target["labels_keypoints"] = labels_keypoints
             target["keypoints"] = keypoints
-            
+
         if links is not None:
+            labels_links = torch.as_tensor(range(links.shape[1]), dtype=torch.float32).expand(*links.shape[:2])
+            keep_links =  links[:,:,-1] > 0
+
+            links = links[keep_links][:,:-1]
+            labels_links = labels_links[keep_links]
+
+            target["labels_links"] = labels_links
             target["links"] = links
 
         # for conversion to coco api
