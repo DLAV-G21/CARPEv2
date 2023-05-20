@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 val2017/*
+*.zip
+carpe_data/*
 # C extensions
 *.so
 

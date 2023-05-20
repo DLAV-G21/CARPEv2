@@ -10,23 +10,35 @@ import torch
 import torch.utils.data
 import torchvision
 from pycocotools import mask as coco_mask
+import albumentations as al
 
 import datasets.transforms as T
 
 
 class CocoDetection(torchvision.datasets.CocoDetection):
-    def __init__(self, img_folder, ann_file, transforms):
+    def __init__(self, img_folder, ann_file, transforms,al_transforms,apply_augm,apply_occlusion_augmentation, segmentation_folder):
         super(CocoDetection, self).__init__(img_folder, ann_file)
         self._transforms = transforms
+        self.al_transforms = al_transforms
         self.prepare = ConvertCocoPolysToMask()
+        self.apply_augm = apply_augm
+        self.apply_occlusion_augmentation = apply_occlusion_augmentation
+        self.segmentation_folder = segmentation_folder
 
     def __getitem__(self, idx):
         img, target = super(CocoDetection, self).__getitem__(idx)
         image_id = self.ids[idx]
         target = {'image_id': image_id, 'annotations': target}
         img, target = self.prepare(img, target)
+
+        if self.apply_occlusion_augmentation:
+            pass
+
+        if self.al_transforms is not None and self.apply_augm: 
+            img = self.al_transforms(image=img)["image"]
         if self._transforms is not None:
             img, target = self._transforms(img, target)
+
         return img, target
 
 
@@ -71,6 +83,7 @@ class ConvertCocoPolysToMask(object):
         keypoints = None
         if anno and "keypoints" in anno[0]:
             keypoints = [obj["keypoints"] for obj in anno]
+            print("list_len",len(keypoints))
             keypoints = torch.as_tensor(keypoints, dtype=torch.float32)
             num_keypoints = keypoints.shape[0]
             if num_keypoints:
@@ -103,47 +116,63 @@ class ConvertCocoPolysToMask(object):
         return image, target
 
 
-def make_coco_transforms(image_set):
+def make_coco_transforms(image_set,size, apply_augm):
 
     normalize = T.Compose([
         T.ToTensor(),
         T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
 
-    scales = [480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800]
 
     if image_set == 'train':
-        return T.Compose([
-            T.RandomHorizontalFlip(),
-            T.RandomSelect(
-                T.RandomResize(scales, max_size=1333),
-                T.Compose([
-                    T.RandomResize([400, 500, 600]),
-                    T.RandomSizeCrop(384, 600),
-                    T.RandomResize(scales, max_size=1333),
-                ])
-            ),
-            normalize,
-        ])
+        lst = []
+        
+        if apply_augm: 
+            lst.append(T.RandomHorizontalFlip())
+        lst.append(T.Resize(size))
+        lst.append(normalize)
+        return T.Compose(lst)       
+        
 
     if image_set == 'val':
         return T.Compose([
-            T.RandomResize([800], max_size=1333),
+            T.Resize(size),
             normalize,
         ])
 
     raise ValueError(f'unknown {image_set}')
 
+def albumentations_transform(image_set):
+    if image_set == "train": 
+        return al.Compose([
+        al.HorizontalFlip(p=0.5),
+        al.ColorJitter(0.4, 0.4, 0.5, 0.2, p=0.6),
+        al.RandomBrightnessContrast(p=0.5),
+        al.ToGray(p=0.01),
+        al.FancyPCA(p=0.3),
+        al.JpegCompression(50, 80,p=0.1),
+        al.RandomSunFlare(p=0.05),
+        al.Solarize(p=0.05),
+        al.GaussNoise(var_limit=(1.0,30.0), p=0.2)
+      ])
+    elif image_set == "val":
+        return None
 
 def build(image_set, args):
     root = Path(args.coco_path)
     assert root.exists(), f'provided COCO path {root} does not exist'
-    mode = 'instances'
+    mode = 'person_keypoints'
     PATHS = {
-        "train": (root / "train2017", root / "annotations" / f'{mode}_train2017.json'),
-        "val": (root / "val2017", root / "annotations" / f'{mode}_val2017.json'),
+        "train": (root / "train",  root/"annotations"/f'keypoints_train_{args.nb_keypoints}.json',root/"train_segm_npz"),
+        "val": (root / "val",  root/"annotations"/f'keypoints_val_{args.nb_keypoints}.json',root/"val_segm_npz"),
+        "test": (root / "test", root/"annotations"/f'keypoints_test_{args.nb_keypoints}.json',root/"test_segm_npz")
     }
 
-    img_folder, ann_file = PATHS[image_set]
-    dataset = CocoDetection(img_folder, ann_file, transforms=make_coco_transforms(image_set))
+    img_folder, ann_file, segmentation_folder = PATHS[image_set]
+    dataset = CocoDetection(img_folder, ann_file, 
+        transforms=make_coco_transforms(image_set,args.input_image_resize,args.apply_augmentation), 
+        al_transforms=albumentations_transform(image_set),
+        apply_augm=args.apply_augmentation, 
+        apply_occlusion_augmentation=args.apply_occlusion_augmentation,
+        segmentation_folder=segmentation_folder)
     return dataset
