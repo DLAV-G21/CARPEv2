@@ -29,6 +29,12 @@ def hflip(image, target):
         keypoints = target["keypoints"]
         keypoints = keypoints[:]*torch.as_tensor([-1,1,1]) + torch.as_tensor([w,0,0])
         target["keypoints"] = keypoints
+
+    if "links" in target:
+        links = target["links"]
+        links = links[:]*torch.as_tensor([-1,1,-1,1,1]) + torch.as_tensor([w,0,w,0,0])
+        target["links"] = links
+
     return flipped_image, target
 
 
@@ -57,6 +63,11 @@ def resize(image, target, size):
         keypoints = target["keypoints"]
         scaled_keypoints = keypoints*torch.as_tensor([ratio_width, ratio_height, 1.0])
         target["keypoints"] = scaled_keypoints
+        
+    if "links" in target:
+        links = target["links"]
+        scaled_links = links*torch.as_tensor([ratio_width, ratio_height, ratio_width, ratio_height, 1.0])
+        target["links"] = scaled_links
 
     h, w = size
     target["size"] = torch.tensor([h, w])
@@ -109,6 +120,11 @@ class Normalize(object):
             keypoints = target["keypoints"]
             keypoints = keypoints/torch.tensor([w,h,1.0],dtype=torch.float32)
             target["keypoints"] = keypoints
+
+        if "links" in target:
+            links = target["links"]
+            links = links/torch.tensor([w,h,w,h,1.0],dtype=torch.float32)
+            target["links"] = links
             
         return image, target
 
@@ -118,12 +134,8 @@ class Compose(object):
         self.transforms = transforms
 
     def __call__(self, image, target):
-        print("COMPOOOOSE")
-        print(target["keypoints"].shape)
-        print(target["keypoints"])
         for t in self.transforms:
             image, target = t(image, target)
-        print(target["keypoints"])
         raise ValueError()
         return image, target
 
