@@ -3,6 +3,7 @@
 DETR model and criterion classes.
 """
 import torch
+import numpy as np
 import torch.nn.functional as F
 from torch import nn
 
@@ -69,7 +70,7 @@ class CARPE(nn.Module):
         outputs_class = self.class_keypoints(hs)
         outputs_coord = self.pos_keypoints(hs).sigmoid()
 
-        out = {'pred_logits': outputs_class[-1], 'pred_keypoints': outputs_coord[-1]}
+        out = {'pred_logits_keypoints': outputs_class[-1], 'pred_keypoints': outputs_coord[-1]}
         return out
 
 
@@ -104,7 +105,7 @@ class SetCriterion(nn.Module):
         """Classification loss (NLL)
         targets dicts must contain the key "labels" containing a tensor of dim [nb_target_boxes]
         """
-        src_logits = outputs['pred_logits']
+        src_logits = outputs['pred_logits_keypoints']
         idx = self._get_src_permutation_idx(indices)
 
         # Concatenate the classes of all keypoints / images
@@ -182,7 +183,11 @@ class SetCriterion(nn.Module):
         return losses
 
 
-class PostProcess(nn.Module):
+class PostProcessCOCO(nn.Module):
+    def __init__(self, mode) -> None:
+        super().__init__()
+        self.mode = mode
+
     """ This module converts the model's output into the format expected by the coco api"""
     @torch.no_grad()
     def forward(self, outputs, targets):
@@ -193,26 +198,74 @@ class PostProcess(nn.Module):
                           For evaluation, this must be the original image size (before any data augmentation)
                           For visualization, this should be the image size after data augment, but before padding
         """
-        out_logits, out_bbox = outputs['pred_logits'], outputs['pred_keypoints']
+        out_logits, out_positions = outputs[f'pred_logits_{self.mode}'], outputs[f'pred_{self.mode}']
 
+        nb_class = out_logits.shape[-1] - 1
+
+        print()
+        print()
+        print([t.keys() for t in targets])
+
+        target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)
         assert len(out_logits) == len(target_sizes)
-        assert target_sizes.shape[1] == 2
 
         prob = F.softmax(out_logits, -1)
         scores, labels = prob[..., :-1].max(-1)
 
-        target_sizes = torch.stack([t["size"] for t in targets])
+        target_sizes = target_sizes.expand(out_positions.shape[1], *target_sizes.shape).permute(1,0,2)
+        positions = out_positions * target_sizes
+
+        image_ids = torch.stack([t["image_id"] for t in targets], dim=0).squeeze(1).cpu().numpy()
+
+        results = []
+        for image_id, score, label, position in zip(image_ids, scores, labels, positions):
+            for s, l, p in zip(score, label, position):
+                if(l < nb_class):
+                    keypoints = np.zeros(nb_class * 3)
+                    keypoints[l*3+0] = p[0]
+                    keypoints[l*3+1] = p[1]
+                    keypoints[l*3+2] = 2
+                    
+                    results.append({
+                        'image_id': image_id, 'category_id': 1, 'score': s.item(), "nbr_keypoints": 1, 'area': 200, 'keypoints':list(keypoints)
+                    })
+                    print(results)
+                    raise True
+
+        return results
+
+class PostProcess(nn.Module):
+    def __init__(self, mode) -> None:
+        super().__init__()
+        self.mode = mode
+
+    """ This module converts the model's output into the format expected by the coco api"""
+    @torch.no_grad()
+    def forward(self, outputs, target):
+        """ Perform the computation
+        Parameters:
+            outputs: raw outputs of the model
+            target_sizes: tensor of dimension [batch_size x 2] containing the size of each images of the batch
+                          For evaluation, this must be the original image size (before any data augmentation)
+                          For visualization, this should be the image size after data augment, but before padding
+        """
+
+        
+        out_logits, out_pos = outputs[f'pred_logits_{self.mode}'], outputs[f'pred_{self.mode}']
+
+        print([t.keys() for t in target])
+
+        target_sizes = torch.stack([t["orig_size"] for t in target], dim=0)
+        assert len(out_logits) == len(target_sizes)
+
+        prob = F.softmax(out_logits, -1)
+        scores, labels = prob[..., :-1].max(-1)
 
 
-        # convert to [x0, y0, x1, y1] format
-        boxes = box_ops.box_cxcywh_to_xyxy(out_bbox)
-        # and from relative [0, 1] to absolute [0, height] coordinates
-        img_h, img_w = target_sizes.unbind(1)
-        scale_fct = torch.stack([img_w, img_h, img_w, img_h], dim=1)
-        boxes = boxes * scale_fct[:, None, :]
+        target_sizes = target_sizes.expand(out_pos.shape[1], out_pos.shape[2]//target_sizes.shape[1], *target_sizes.shape).permute(2,0,1,3).reshape(out_pos.shape)
+        pos = out_pos * target_sizes
 
-        results = [{'scores': s, 'labels': l, 'boxes': b} for s, l, b in zip(scores, labels, boxes)]
-
+        results = [{'scores': s, 'labels': l, self.mode: b} for s, l, b in zip(scores, labels, pos)]
         return results
 
 
@@ -264,6 +317,6 @@ def build(args):
     criterion = SetCriterion(args.nb_keypoints,args.nb_links, matcher=matcher, matcher_links=matcher_links, weight_dict=weight_dict,
                              eos_coef=args.eos_coef, losses=losses)
     criterion.to(device)
-    postprocessors = {'keypoints': PostProcess()}
+    postprocessors = {'keypoints' : PostProcessCOCO('keypoints'), 'keypoints_': PostProcess('keypoints'), 'links_': PostProcess('links')}
 
     return model, criterion, postprocessors

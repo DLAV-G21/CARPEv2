@@ -173,11 +173,11 @@ def main(args):
     log.info("Start training...")
     start_time = time.time()
     for epoch in range(args.start_epoch, args.epochs):
-        train_one_epoch(
-            model, criterion, data_loader_train, optimizer, device, epoch,
-            args.clip_max_norm)
-
-        lr_scheduler.step()
+#        train_one_epoch(
+#            model, criterion, data_loader_train, optimizer, device, epoch,
+#            args.clip_max_norm)
+#
+#        lr_scheduler.step()
 
         if args.output_dir:
             checkpoint_paths = [output_dir / 'checkpoint.pth']
