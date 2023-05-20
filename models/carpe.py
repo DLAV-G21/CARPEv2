@@ -202,9 +202,6 @@ class PostProcessCOCO(nn.Module):
 
         nb_class = out_logits.shape[-1] - 1
 
-        print()
-        print()
-        print([t.keys() for t in targets])
 
         target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)
         assert len(out_logits) == len(target_sizes)
@@ -229,8 +226,6 @@ class PostProcessCOCO(nn.Module):
                     results.append({
                         'image_id': image_id, 'category_id': 1, 'score': s.item(), "nbr_keypoints": 1, 'area': 200, 'keypoints':list(keypoints)
                     })
-                    print(results)
-                    raise True
 
         return results
 
@@ -253,7 +248,6 @@ class PostProcess(nn.Module):
         
         out_logits, out_pos = outputs[f'pred_logits_{self.mode}'], outputs[f'pred_{self.mode}']
 
-        print([t.keys() for t in target])
 
         target_sizes = torch.stack([t["orig_size"] for t in target], dim=0)
         assert len(out_logits) == len(target_sizes)

@@ -1,8 +1,7 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 """
-COCO evaluator that works in distributed mode.
 
-Mostly copy-paste from https://github.com/pytorch/vision/blob/edfd5a7/references/detection/coco_eval.py
+Mostly copy-paste from https://github.com/padeler/PE-former/blob/master/datasets/coco_eval.py
 The difference is that there is less copy-pasting from pycocotools
 in the end of the file, as python3 can suppress prints with contextlib
 """
@@ -34,6 +33,10 @@ class CocoEvaluator(object):
         self.img_ids = []
         self.eval_imgs = {k: [] for k in iou_types}
 
+    def set_scale(self, sigmas):
+        for iou_type in self.iou_types:
+            self.coco_eval[iou_type].params.kpt_oks_sigmas = np.asarray(sigmas)
+
     def update(self, predictions):
         img_ids = list(np.unique(list(predictions.keys())))
         self.img_ids.extend(img_ids)
@@ -59,7 +62,6 @@ class CocoEvaluator(object):
         https://cocodataset.org/#format-results        
         '''
         self.keypoint_predictions.extend(predictions)
-
     def _evaluate_keypoints(self):
         iou_type = 'keypoints'
         img_ids = list(np.unique([k['image_id'] for k in self.keypoint_predictions]))

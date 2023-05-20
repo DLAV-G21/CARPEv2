@@ -5,6 +5,8 @@ __pycache__/
 val2017/*
 *.zip
 carpe_data/*
+runs/*
+models/model_saves/*
 # C extensions
 *.so
 

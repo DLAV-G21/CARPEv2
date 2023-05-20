@@ -5,22 +5,24 @@ import json
 import random
 import time
 from pathlib import Path
-
+import os
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, DistributedSampler
-
+from datetime import datetime
 import datasets
 import util.misc as utils
 from datasets import build_dataset, get_coco_api_from_dataset
 from engine import evaluate, train_one_epoch
 from models import build_model
+from torch.utils.tensorboard import SummaryWriter
 
 import logging
 
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
+    parser.add_argument("training_name",type=str)
     parser.add_argument('--lr', default=1e-4, type=float)
     parser.add_argument('--lr_backbone', default=1e-5, type=float)
     parser.add_argument('--batch_size', default=2, type=int)
@@ -76,7 +78,7 @@ def get_args_parser():
     parser.add_argument('--coco_path', type=str)
     parser.add_argument('--remove_difficult', action='store_true')
 
-    parser.add_argument('--output_dir', default='',
+    parser.add_argument('--output_dir', default=os.path.join("models","model_saves"),
                         help='path where to save, empty for no saving')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
@@ -103,7 +105,6 @@ def get_args_parser():
 def main(args):
     logging.basicConfig(level=10)
     log = logging.getLogger("g21")
-    log.info(args)
 
     device = torch.device(args.device)
 
@@ -112,11 +113,11 @@ def main(args):
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
-
+    writer = SummaryWriter()
     model, criterion, postprocessors = build_model(args)
 
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    log.info('Number of trainable parameters', n_parameters)
+    log.info(f'Number of trainable parameters {n_parameters}' )
 
     param_dicts = [
         {"params": [p for n, p in model.named_parameters() if "backbone" not in n and p.requires_grad]},
@@ -144,8 +145,13 @@ def main(args):
                                    collate_fn=utils.collate_fn, num_workers=args.num_workers)
     data_loader_val = DataLoader(dataset_val, args.batch_size, sampler=sampler_val,
                                  drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers)
-
-    output_dir = Path(args.output_dir)
+    output_dir = os.path.join(args.output_dir, args.training_name)
+    if os.path.exists(output_dir):
+        timestamp = datetime.now().strftime('_%Y_%m_%d_%H_%M_%S')
+        output_dir += timestamp
+    log.info("The output directory is :"+output_dir)
+    os.makedirs(output_dir)
+    output_dir = Path(output_dir)
 
     if args.pretrained_keypoints:
         pass
@@ -155,7 +161,7 @@ def main(args):
         pretrained_state = { k:v for k,v in model_ckpt.state_dict().items() if k in model_state and v.size() == model_state[k].size() }
         for k,v in model.state_dict().items():
             if k not in pretrained_state:
-                log.info("The following key "+k+" has not been found.")
+                log.info("The following key "+k+" has not been found in the pretrained dictionary.")
                 pretrained_state[k] = v
 
         model_state.update(pretrained_state)
@@ -165,38 +171,37 @@ def main(args):
 
     if args.eval:
         test_stats, coco_evaluator = evaluate(model, criterion, postprocessors,
-                                              data_loader_val, base_ds, device, args.output_dir)
-        if args.output_dir:
-            utils.save_on_master(coco_evaluator.coco_eval["bbox"].eval, output_dir / "eval.pth")
+                                              data_loader_val, base_ds, device, args.output_dir,nb_keypoints=args.nb_keypoints)
         return
 
     log.info("Start training...")
     start_time = time.time()
     for epoch in range(args.start_epoch, args.epochs):
-#        train_one_epoch(
-#            model, criterion, data_loader_train, optimizer, device, epoch,
-#            args.clip_max_norm)
-#
-#        lr_scheduler.step()
+        log.info(f"Starting training step for epoch {epoch}...")
+        train_one_epoch(
+            model, criterion, data_loader_train, optimizer, device, epoch,
+            args.clip_max_norm,logger=writer)
 
-        if args.output_dir:
-            checkpoint_paths = [output_dir / 'checkpoint.pth']
-            # extra checkpoint before LR drop and every 100 epochs
-            if (epoch + 1) % args.lr_drop == 0 or (epoch + 1) % 100 == 0:
-                checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
-            for checkpoint_path in checkpoint_paths:
-                utils.save_on_master({
-                    'model': model_without_ddp.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                    'lr_scheduler': lr_scheduler.state_dict(),
-                    'epoch': epoch,
-                    'args': args,
-                }, checkpoint_path)
+        lr_scheduler.step()
+        
+        log.info(f"Saving model at epoch {epoch}...")
+        checkpoint_paths = [output_dir / f'checkpoint{epoch:04}.pth']
+        # extra checkpoint before LR drop and every 100 epochs
+        if (epoch + 1) % args.lr_drop == 0 or (epoch + 1) % 100 == 0:
+            checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
+        for checkpoint_path in checkpoint_paths:
+            torch.save({
+                'model': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'lr_scheduler': lr_scheduler.state_dict(),
+                'epoch': epoch,
+                'args': args,
+            }, checkpoint_path)
 
         base_ds = get_coco_api_from_dataset(dataset_val)
-        
-        test_stats, coco_evaluator = evaluate(
-            model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir
+        log.info(f"Starting evaluation step for epoch {epoch}...")
+        coco_evaluator = evaluate(
+            model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir, logger=writer, epoch=epoch,nb_keypoints=args.nb_keypoints
         )
         """
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
@@ -226,7 +231,7 @@ def main(args):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser('DETR training and evaluation script', parents=[get_args_parser()])
+    parser = argparse.ArgumentParser('CARPE training and evaluation script', parents=[get_args_parser()])
     args = parser.parse_args()
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
