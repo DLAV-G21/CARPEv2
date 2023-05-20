@@ -209,6 +209,7 @@ class PostProcessCOCO(nn.Module):
         prob = F.softmax(out_logits, -1)
         scores, labels = prob[..., :-1].max(-1)
 
+
         target_sizes = target_sizes.expand(out_positions.shape[1], *target_sizes.shape).permute(1,0,2)
         positions = out_positions * target_sizes
 

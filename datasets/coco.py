@@ -11,13 +11,15 @@ import torch.utils.data
 import torchvision
 from pycocotools import mask as coco_mask
 import albumentations as al
+import numpy as np
 
 import datasets.transforms as T
 
 
 class CocoDetection(torchvision.datasets.CocoDetection):
-    def __init__(self, img_folder, ann_file, transforms,al_transforms,apply_augm,apply_occlusion_augmentation, segmentation_folder):
+    def __init__(self, img_folder, ann_file, transforms,al_transforms,apply_augm,apply_occlusion_augmentation, segmentation_folder,split):
         super(CocoDetection, self).__init__(img_folder, ann_file)
+        self.split = split
         self._transforms = transforms
         self.al_transforms = al_transforms
         self.prepare = ConvertCocoPolysToMask()
@@ -29,7 +31,7 @@ class CocoDetection(torchvision.datasets.CocoDetection):
         img, target = super(CocoDetection, self).__getitem__(idx)
         image_id = self.ids[idx]
         target = {'image_id': image_id, 'annotations': target}
-        img, target = self.prepare(img, target)
+        img, target = self.prepare(img, target, self.split)
 
         if self.apply_occlusion_augmentation:
             pass
@@ -60,9 +62,9 @@ def convert_coco_poly_to_mask(segmentations, height, width):
 
 
 class ConvertCocoPolysToMask(object):
-    def __call__(self, image, target):
+    def __call__(self, image, target,split):
         w, h = image.size
-
+        
         image_id = target["image_id"]
         image_id = torch.tensor([image_id])
 
@@ -108,6 +110,7 @@ class ConvertCocoPolysToMask(object):
 
         target = {}
         target["boxes"] = boxes
+
         target["labels"] = classes
 
         target["image_id"] = image_id
@@ -140,6 +143,9 @@ class ConvertCocoPolysToMask(object):
 
         target["orig_size"] = torch.as_tensor([int(h), int(w)])
         target["size"] = torch.as_tensor([int(h), int(w)])
+        if split == "val" or split=="test":
+            pass
+            #target["image"] = np.array(image.copy())
 
         return image, target
 
@@ -204,5 +210,6 @@ def build(image_set, args):
         al_transforms=albumentations_transform(image_set),
         apply_augm=args.apply_augmentation, 
         apply_occlusion_augmentation=args.apply_occlusion_augmentation,
-        segmentation_folder=segmentation_folder)
+        segmentation_folder=segmentation_folder, 
+        split=image_set)
     return dataset

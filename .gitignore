@@ -6,6 +6,7 @@ val2017/*
 *.zip
 carpe_data/*
 runs/*
+out_images/*
 models/model_saves/*
 # C extensions
 *.so

@@ -9,11 +9,12 @@ import sys
 from typing import Iterable
 
 import torch
-
+import matplotlib.pyplot as plt
+import cv2
 import util.misc as utils
 from datasets.coco_eval import CocoEvaluator
 from tqdm import tqdm
-
+import itertools
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
@@ -31,6 +32,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         outputs = model(samples)
         loss_dict = criterion(outputs, targets)
         weight_dict = criterion.weight_dict
+
         losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
 
         if not math.isfinite(losses.item()):
@@ -50,7 +52,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
 
 @torch.no_grad()
-def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, output_dir, epoch=0, logger=None,nb_keypoints=24):
+def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, output_dir, epoch=0, logger=None,nb_keypoints=24,visualize_keypoints=False,out_folder=""):
     model.eval()
     criterion.eval()
     iou_types = ["keypoints"]
@@ -61,15 +63,24 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
 
     for samples, targets in tqdm(data_loader):
         samples = samples.to(device)
-        targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+
+        #eval_images =[t["image"] for t in targets]
+        targets = [{k: v.to(device) for k, v in t.items() if k != "image" } for t in targets ]
 
         outputs = model(samples)
         loss_dict = criterion(outputs, targets)
         weight_dict = criterion.weight_dict
 
         results = postprocessors['keypoints'](outputs, targets)
+
         if coco_evaluator is not None:
             coco_evaluator.update_keypoints(results)
+
+        if visualize_keypoints:
+            for target,image in zip(targets,eval_images):
+                filt =[out for out in results if out["image_id"] == target["image_id"]]
+                plot_and_save_keypoints_inference(image,target["image_id"].item(), filt, out_folder)
+
 
     if coco_evaluator is not None:
         coco_evaluator.synchronize_between_processes()
@@ -93,3 +104,35 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
             logger.add_scalar("val/AR.lar", stats[9],epoch)
 
     return coco_evaluator
+
+
+
+def plot_and_save_keypoints_inference(img, img_id,data, output_folder):
+    skeleton = []#CAR_SKELETON_24 if True else CAR_SKELETON_66
+    nb_kps = 24 if True else nb_kps
+    colors =  plt.cm.tab20( (10./9*np.arange(20*9/10)).astype(int) )
+
+    for lst in data: 
+      kps = lst["keypoints"]
+      all_found_kps = [ ]
+      all_kps_coordinate=[]
+      for i in range(nb_kps):
+        x,y,z = tuple(kps[i*3:(i+1)*3])
+        if z > 0:
+          x= int(x)
+          y = int(y)
+          all_found_kps.append(int(i+1))
+          all_kps_coordinate.append((x,y))
+        else:
+          all_kps_coordinate.append((-1,-1))
+        
+      set_of_pairs = set(itertools.permutations(all_found_kps,2))
+
+      for idx, (a,b) in enumerate(skeleton):
+        if (a,b) in set_of_pairs:
+          r,g,bc,ac = colors[idx%len(colors)]                  
+          cv2.line(img,all_kps_coordinate[a-1], all_kps_coordinate[b-1],color=[int(bc*255),int(g*255),int(r*255)],thickness=18)
+
+      for a in all_found_kps:
+        cv2.circle(img, all_kps_coordinate[a-1],20, color=[0,0,255],thickness=-1)
+    cv2.imwrite(os.path.join(output_folder, f"{img_id}.jpg"),img)
