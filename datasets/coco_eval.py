@@ -30,6 +30,7 @@ class CocoEvaluator(object):
         for iou_type in iou_types:
             self.coco_eval[iou_type] = COCOeval(coco_gt, iouType=iou_type)
 
+        self.keypoint_predictions = []
         self.img_ids = []
         self.eval_imgs = {k: [] for k in iou_types}
 
@@ -52,7 +53,35 @@ class CocoEvaluator(object):
 
             self.eval_imgs[iou_type].append(eval_imgs)
 
+    def update_keypoints(self, predictions):
+        '''
+        Expects the result format for coco keypoints detection
+        https://cocodataset.org/#format-results        
+        '''
+        self.keypoint_predictions.extend(predictions)
+
+    def _evaluate_keypoints(self):
+        iou_type = 'keypoints'
+        img_ids = list(np.unique([k['image_id'] for k in self.keypoint_predictions]))
+        self.img_ids.extend(img_ids)
+
+        # suppress pycocotools prints
+        with open(os.devnull, 'w') as devnull:
+            with contextlib.redirect_stdout(devnull):
+                coco_dt = COCO.loadRes(self.coco_gt, self.keypoint_predictions) if self.keypoint_predictions else COCO()
+        coco_eval = self.coco_eval[iou_type]
+
+        coco_eval.cocoDt = coco_dt
+        coco_eval.params.imgIds = list(img_ids)
+        img_ids, eval_imgs = evaluate(coco_eval)
+
+        self.eval_imgs[iou_type].append(eval_imgs)
+
     def synchronize_between_processes(self):
+
+        if 'keypoints' in self.iou_types:
+            self._evaluate_keypoints()
+
         for iou_type in self.iou_types:
             self.eval_imgs[iou_type] = np.concatenate(self.eval_imgs[iou_type], 2)
             create_common_coco_eval(self.coco_eval[iou_type], self.img_ids, self.eval_imgs[iou_type])
