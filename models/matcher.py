@@ -63,15 +63,22 @@ class HungarianMatcher(nn.Module):
             For each batch element, it holds:
                 len(index_i) = len(index_j) = min(num_queries, num_target_boxes)
         """
+        print("PD")
+        print(outputs["pred_"+self.mode].shape)
+        print(targets[0][self.mode].shape)
+        print("NNNNNNNAAAAAAN")
         bs, num_queries = outputs["pred_logits"].shape[:2]
 
         # We flatten to compute the cost matrices in a batch
         out_prob = outputs["pred_logits"].flatten(0, 1).softmax(-1)  # [batch_size * num_queries, num_classes]
         out_bbox = outputs["pred_"+self.mode].flatten(0, 1)  # [batch_size * num_queries, 4]
-
+        print("out_prob",out_prob.shape)
+        print("out_bbox",out_bbox.shape)
         # Also concat the target labels and boxes
         tgt_ids = torch.cat([v["labels"] for v in targets])
         tgt_bbox = torch.cat([v[self.mode] for v in targets])
+        print("tgt_ids",tgt_ids.shape)
+        print("tgt_box",tgt_bbox.shape)
 
         # Compute the classification cost. Contrary to the loss, we don't use the NLL,
         # but approximate it in 1 - proba[target class].
